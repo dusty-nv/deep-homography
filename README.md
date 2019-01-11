@@ -8,7 +8,7 @@ This repo reproduces the work of [DeTone et al. 2016](https://arxiv.org/pdf/1606
 
 Download the unlabeled [MS-COCO](http://cocodataset.org/#home) dataset and unzip such that the ~330k jpeg images are in `data/unlabeled2017`.
 
-Install the data generation code that uses OpenCV:
+Build the data generation code that uses OpenCV:
 
 ```
 cd data
