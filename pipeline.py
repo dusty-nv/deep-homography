@@ -5,7 +5,7 @@ import zipfile
 import pickle
 import PIL
 import numpy as np
-import tensorflow as tf
+#import tensorflow as tf
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader

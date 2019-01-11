@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 class Net(nn.Module):
   def __init__(self):
-    super().__init__()
+    super(Net, self).__init__()
     #self.sample = nn.AvgPool2d(2)
     self.conv1 = nn.Conv2d(2, 64, 3, padding=1)
     self.bn1 = nn.BatchNorm2d(64)

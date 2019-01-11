@@ -47,7 +47,7 @@ def main(args):
  
   n_it, lr_it = 0, 0
   while n_it < total_it: 
-    train(dataloader_train, device, net, criterion, optimizer)
+    train(dataloader_train, device, net, criterion, optimizer, n_it)
     n_it += len(dataloader_train)
     test(dataloader_eval, device, net, criterion, n_it)
    
@@ -58,9 +58,10 @@ def main(args):
       lr_it = 0
 
 
-def train(dataloader_train, device, net, criterion, optimizer):
+def train(dataloader_train, device, net, criterion, optimizer, n_it):
   net.train()
   for i, data in enumerate(dataloader_train):
+    #print('train iter {:d}  {:d} / {:d}'.format(n_it, i, len(dataloader_train)))
     optimizer.zero_grad()
     inputs, labels = data['image'].to(device), data['label'].to(device)
    
@@ -82,8 +83,8 @@ def test(dataloader_eval, device, net, criterion, n_it):
       running_loss += loss.item()
     running_loss /= len(dataloader_eval)
   
-    torch.save(net.state_dict(), 'homography_model.pytorch')
-    print('{:d} iter.:  {:0.4f}'.format(n_it, running_loss))
+    torch.save(net.state_dict(), 'homography_model_{:d}.pytorch'.format(n_it))
+    print('test iter {:d}  loss:  {:0.4f}'.format(n_it, running_loss))
 
 
 if __name__ == '__main__':
