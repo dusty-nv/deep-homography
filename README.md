@@ -13,6 +13,7 @@ Install the data generation code that uses OpenCV:
 ```
 cd data
 mkdir build
+cd build
 cmake ..
 make
 ```
@@ -20,7 +21,6 @@ make
 Then run the data generation program:
 
 ```
-cd build
 ./make_homography_data ../unlabeled2017 <int_patch_size> <int_max_jitter> <n_samples>
 ```
 
@@ -37,4 +37,20 @@ To see the performance on, e.g., the 4th image:
 ```
 python eval.py --i 3
 ```
+
+#### Notes
+
+If during `eval.py` you recieve the error `TypeError: Couldn't find conversion for foreign struct 'cairo.Context'`, install the following:
+
+```
+$ sudo apt-get install python-gi-cairo
+```
+
+Other dependencies:
+
+```
+$ pip install matplotlib
+```
+
+
 ![Original image, warped image, and original image warped with predicted homography](https://ekrim.github.io/assets/good_img_2.png)
