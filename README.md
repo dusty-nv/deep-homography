@@ -46,11 +46,9 @@ If during `eval.py` you recieve the error `TypeError: Couldn't find conversion f
 $ sudo apt-get install python-gi-cairo
 ```
 
-Other dependencies:
+Other dependencies of `eval.py`:
 
 ```
 $ pip install matplotlib
 ```
 
-
-![Original image, warped image, and original image warped with predicted homography](https://ekrim.github.io/assets/good_img_2.png)
