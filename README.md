@@ -38,7 +38,7 @@ To see the performance on, e.g., the 4th image:
 python eval.py --i 3
 ```
 
-#### Notes
+#### Eval Notes
 
 If during `eval.py` you recieve the error `TypeError: Couldn't find conversion for foreign struct 'cairo.Context'`, install the following:
 
@@ -52,3 +52,27 @@ Other dependencies of `eval.py`:
 $ pip install matplotlib
 ```
 
+#### ONNX Export
+
+To export an ONNX model of the network from PyTorch to `deep_homography.onnx`:
+
+```
+$ python onnx_export.py
+```
+
+If you want to validate that the exported ONNX model is well-formed, first install these packages:
+
+```
+$ sudo apt-get install protobuf-compiler libprotoc-dev
+$ pip install onnx --user
+```
+
+Then run the validation script:
+
+```
+$ python onnx_validate.py
+```
+
+
+
+ 
