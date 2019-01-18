@@ -40,11 +40,17 @@ def pred_homography(batch, patch_size, model_file='homography_model.pytorch', sc
   device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
   print(device)
   batch = normalize_batch(batch).to(device)
+  print('\nnormalized_batch:')
+  print(batch)
+  print(batch.size())
   net = Net()
   net.load_state_dict(torch.load(model_file))  
   net.eval().to(device)
   with torch.no_grad():
-    output = net(batch).detach().cpu().numpy()*scale
+    raw_output = net(batch)
+    print('\nraw_output:')
+    print(raw_output)
+    output = raw_output.detach().cpu().numpy()*scale
     print('\noutput:')
     print(output)
     mean_shift = np.mean(output, axis=0)
@@ -59,9 +65,13 @@ def pred_homography(batch, patch_size, model_file='homography_model.pytorch', sc
     print('\npts2:')
     print(pts2)
 
-    h = np.linalg.inv(cv2.findHomography(pts1, pts2)[0])
+    cv_h = cv2.findHomography(pts1, pts2)[0]
+    print('\nocv homography:')
+    print(cv_h)
+
+    h = np.linalg.inv(cv_h)
     
-    print('\nhomography:')
+    print('\ninv homography:')
     print(h)
 
     return h

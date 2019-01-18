@@ -49,7 +49,7 @@ class Net(nn.Module):
     x = self.bn9(self.drop2(x))
     x = self.fc2(x)
     x = F.tanh(x)
-   
+
     return x
 
 

@@ -44,8 +44,8 @@ def export_onnx(batch, patch_size, model_file='homography_model.pytorch', scale=
   net.load_state_dict(torch.load(model_file))  
   net.eval().to(device)
   
-  input_names = [ "actual_input_1" ]
-  output_names = [ "output1" ]
+  input_names = [ "input_0" ]
+  output_names = [ "output_0" ]
 
   torch.onnx.export(net, batch, "deep_homography.onnx", verbose=True, input_names=input_names, output_names=output_names)
 
