@@ -10,5 +10,8 @@ MESSAGE(STATUS "LINK LIBRARIES ${OpenCV_LIBS}")
 add_executable( make_homography_data_coco make_homography_data_coco.cc image_tools.cc) 
 target_link_libraries( make_homography_data_coco ${OpenCV_LIBS} stdc++fs)
 
-add_executable( make_homography_data_kitti make_homography_data_kitti.cc image_tools.cc) 
+add_executable( make_homography_data_kitti make_homography_data_kitti.cc) 
 target_link_libraries( make_homography_data_kitti ${OpenCV_LIBS} stdc++fs)
+
+add_executable( test_pnp test_pnp.cc) 
+target_link_libraries( test_pnp ${OpenCV_LIBS} stdc++fs)
