@@ -10,8 +10,6 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/opencv.hpp"
 
-#include "image_tools.h"
-
 
 using std::cout;
 using std::endl;
@@ -20,13 +18,47 @@ using std::endl;
 namespace fs = std::experimental::filesystem;
 
 
+cv::Mat computeHomography( const cv::Mat& R_1to2, const cv::Mat& tvec_1to2, const double d_inv, const cv::Mat& normal)
+{
+    cv::Mat homography = R_1to2 + d_inv * tvec_1to2*normal.t();
+    return homography;
+}
+
+cv::Mat computeHomography( const cv::Mat& R1, const cv::Mat& tvec1, cv::Mat& R2, cv::Mat& tvec2,
+					  const double d_inv, const cv::Mat& normal )
+{
+    cv::Mat homography = R2 * R1.t() + d_inv * (-R2 * R1.t() * tvec1 + tvec2) * normal.t();
+    return homography;
+}
+
+void computeC2MC1( const cv::Mat& R1, const cv::Mat& tvec1, const cv::Mat& R2, const cv::Mat& tvec2,
+                   cv::Mat& R_1to2, cv::Mat& tvec_1to2 )
+{
+	//c2Mc1 = c2Mo * oMc1 = c2Mo * c1Mo.inv()
+	R_1to2 = R2 * R1.t();
+	tvec_1to2 = R2 * (-R1.t()*tvec1) + tvec2;
+}
+
+void extractRotation( const cv::Mat& pose, cv::Mat& r )
+{
+	for( int y=0; y < 3; y++ )
+		for( int x=0; x < 3; x++ )
+			r.at<double>(y,x) = pose.at<double>(y,x);
+}
+
+void extractTranslation( const cv::Mat& pose, cv::Mat& t )
+{
+	for( int y=0; y < 3; y++ )
+		t.at<double>(y,0) = pose.at<double>(y,3);
+}
+
 void readme()
 {
 	cout << "Usage: ./make_homography_data_kitti <dataset_directory> <int_patch_size> <int_max_jitter> <n_samples> <bool_show_plots>" << endl;
 }
 
 
-int main(int argc, char **argv )
+int main( int argc, char **argv )
 {
 	cout << "OpenCV Version: " << CV_MAJOR_VERSION << ".";
 	cout << CV_MINOR_VERSION << endl;
@@ -44,8 +76,21 @@ int main(int argc, char **argv )
 	const std::string pose_path(dataset_path + "/poses/00.txt");
 
 	cout << "data path:  " << dataset_path << endl;
-	cout << "pose path:  " << pose_path << endl;
+	cout << "pose path:  " << pose_path << endl << endl;
 	
+
+	/*
+	 * camera instrinsic calibration
+	 * note:  sequences 0-2 of the dataset have the same calibration
+	 *        add support for reading this from the calib.txt files
+	 */
+	cv::Mat instrinsic_mat = (cv::Mat_<double>(3,3) << 
+			7.188560000000e+02, 0.000000000000e+00, 6.071928000000e+02,
+			0.000000000000e+00, 7.188560000000e+02, 1.852157000000e+02, 
+			0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00);
+
+	cout << "camera intrinsic calibration = " << endl << " " << instrinsic_mat << endl << endl;
+
 
 	/*
 	 * open the camera pose file
@@ -66,7 +111,7 @@ int main(int argc, char **argv )
 
 	for( std::string line; std::getline(pose_file, line); )
 	{
-		cout << line << endl;
+		//cout << line << endl;
 
 		std::stringstream parser;
 		parser << line;
@@ -87,130 +132,127 @@ int main(int argc, char **argv )
 				}
 
 				cam_pose.at<double>(y,x) = value;
-
-				cout << "pose(" << y << "," << x << ") = " << cam_pose.at<double>(y,x) << endl;
 			}
 		}
 
-		poses.push_back(cam_pose);	
+		//cout << endl << "pose[" << poses.size() << "] = " << endl << " " << cam_pose << endl << endl;
+		poses.push_back(cam_pose);
+
+		//if( poses.size() >= 3 )
+		//	break;	
 	}
 
-	cout << "parsed " << poses.size() << " camera poses" << endl;
 	pose_file.close();
 
+	const uint32_t numPoses = poses.size();	
+	cout << "parsed " << numPoses << " camera poses" << endl << endl;
 	
+	if( numPoses == 0 )
+	{
+		cout << "error:  zero camera poses were parsed" << endl;
+		return -1;
+	}
 
 	
+	/*
+	 * process each frame
+	 */	
+	std::vector<uint32_t> outlierFrames;
+	const double outlierThreshold = 15.0;
 
-#if 0
-  std::string dir_name(argv[1]);
-  int patch_size = atoi(argv[2]);
-  int max_jitter = atoi(argv[3]);
-  int n_samples = atoi(argv[4]);
-  
-  cout << "OpenCV Version: " << CV_MAJOR_VERSION << ".";
-  cout << CV_MINOR_VERSION << endl;
-  
-  bool show_plots = false;
-  if (argc == 6){
-    show_plots = (bool)atoi(argv[5]);
-  } else if (argc > 6 || argc < 5){
-    readme(); return -1;
-  } 
- 
-  unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-  std::mt19937 gen(seed);
- 
-  int cnt = 0; 
-  char f_roi_orig[50];
-  char f_roi_warp[50];
-  char f_number[9];
-  std::ofstream f_labels("../label_file.txt");
-  
-  bool had_enough = false;
-  while (!had_enough){
-    for (auto const& f_it: fs::directory_iterator(dir_name)){
-      cout << cnt << endl;
-       
-      // reading the file
-      std::string img_file = f_it.path().string();
-      //cout << img_file << endl;
-      Mat img_init = imread( img_file, CV_LOAD_IMAGE_COLOR);
-      Mat img;
-      resize(img_init, img, Size(320, 240));   
-      //print_dim(img);
+	for( uint32_t n=0; n < numPoses-1; n++ )
+	{
+		cout << "-----------------------------------------" << endl;
+		cout << "-- FRAME " << n << endl;
+		cout << "-----------------------------------------" << endl;
 
-      if (img.rows > 220 && img.cols > 300){
-        // the new files
-        sprintf(f_number, "%09d", cnt);
-        sprintf(f_roi_orig, "../synth_data/%09d_orig.jpg", cnt);
-        sprintf(f_roi_warp, "../synth_data/%09d_warp.jpg", cnt);
-        //cout << f_roi_orig << endl;
-        f_labels << f_number << ";";
+		// extract rotation/translation from frame #1
+		cv::Mat R1(3, 3, CV_64FC1);
+		cv::Mat T1(3, 1, CV_64FC1);
 
-        // patch and jittered patch
-        Patch patch(img, patch_size, max_jitter);
-        patch.random_shift(gen);
-        vector<Point2f> pts1 = patch.get_corners();
-        patch.random_skew(gen);
-        vector<Point2f> pts2 = patch.get_corners();
+		extractRotation(poses[n], R1);
+		extractTranslation(poses[n], T1);
 
-        Mat h = findHomography(pts1, pts2).inv();
-         
-        // save the label data
-        for (int i_pts = 0; i_pts < pts1.size(); ++i_pts){
-          f_labels << pts2[i_pts].x - pts1[i_pts].x << ",";
-          f_labels << pts2[i_pts].y - pts1[i_pts].y << ",";
-        }
-        f_labels << endl;
+		cout << "R1 = " << endl << " " << R1 << endl << endl;
+		cout << "T1 = " << endl << " " << T1 << endl << endl;
 
-        // apply the transformation
-        Mat img_new;
-        warpPerspective(img, img_new, h, img.size());
+		// extract rotation/translation from frame #2
+		cv::Mat R2(3, 3, CV_64FC1);
+		cv::Mat T2(3, 1, CV_64FC1);
 
-        if (show_plots){
-          plot_pts(img, pts1);
-          plot_pts(img, pts2);
-          draw_poly(img, pts1, RED);
-          draw_poly(img, pts2, BLUE);
-        
-          imshow("Source image", img);
-          imshow("Warped source image", img_new);
-        }
+		extractRotation(poses[n+1], R2);
+		extractTranslation(poses[n+1], T2);
 
-        int width = pts1[1].x - pts1[0].x;
-        int height = pts1[2].y - pts1[1].y;
- 
-        // convert the original roi to grayscale
-        Mat roi = Mat(img, Rect(pts1[0].x, pts1[0].y, width, height)).clone();
-        Mat roi_gray(roi);
-        cvtColor(roi, roi_gray, CV_RGB2GRAY);
+		cout << "R2 = " << endl << " " << R2 << endl << endl;
+		cout << "T2 = " << endl << " " << T2 << endl << endl;
 
-        if (show_plots){
-          imshow("Source rect", roi_gray);
-        }
-        imwrite(f_roi_orig, roi_gray);
+		// compute camera displacement
+		cv::Mat R_1to2;
+		cv::Mat T_1to2;
 
-        // convert the warped roi to grayscale
-        Mat roi_new = Mat(img_new, Rect(pts1[0].x, pts1[0].y, width, height)).clone();
-        Mat roi_new_gray(roi_new);
-        cvtColor(roi_new, roi_new_gray, CV_RGB2GRAY);
-        if (show_plots){
-          imshow("Warped rect", roi_new_gray);
-          waitKey(0);
-        }
-        imwrite(f_roi_warp, roi_new_gray);
-        cnt++;
-        if (cnt >= n_samples){
-          had_enough = true;
-          break;
-        }
-      } // end if img big enough
-    } // end for file in dir
-  } // end while
+		computeC2MC1(R1, T1, R2, T2, R_1to2, T_1to2);
 
-  f_labels.close();
-#endif
+		cout << "R_1to2 rows: " << R_1to2.rows << " cols: " << R_1to2.cols << endl;
+		cout << "T_1to2 rows: " << T_1to2.rows << " cols: " << T_1to2.cols << endl << endl;
+
+		cout << "R_1to2 = " << endl << " " << R_1to2 << endl << endl;
+		cout << "T_1to2 = " << endl << " " << T_1to2 << endl << endl;
+
+		// compute plane normal @ camera #1
+		cv::Mat normal  = (cv::Mat_<double>(3,1) << 0, 0, 1);
+    		cv::Mat normal1 = R1*normal;
+
+		cout << "normal1 = " << endl << " " << normal1 << endl << endl;
+
+		// compute plane distance to camera frame #1
+		cv::Mat origin(3, 1, CV_64F, cv::Scalar(0));
+		cv::Mat origin1 = R1 * origin + T1;
+
+		cout << "origin1 = " << endl << " " << origin1 << endl << endl;
+
+		const double d_inv1 = 1.0 / normal1.dot(origin1);
+		cout << "d_inv1 = " << d_inv1 << endl << endl;
+
+		if( std::fabs(d_inv1) >= outlierThreshold )
+			outlierFrames.push_back(n);
+
+		// compute homography from camera displacement
+		cv::Mat homography_euclidean = computeHomography(R_1to2, T_1to2, d_inv1, normal1);
+		cv::Mat homography = instrinsic_mat * homography_euclidean * instrinsic_mat.inv();
+
+		cout << "homography_euclidean = " << endl << " " << homography_euclidean << endl << endl;
+		cout << "homography = " << endl << " " << homography << endl << endl;
+		
+		homography_euclidean /= homography_euclidean.at<double>(2,2);
+		homography /= homography.at<double>(2,2);
+
+		cout << "homography_euclidean = " << endl << " " << homography_euclidean << endl << endl;
+		cout << "homography = " << endl << " " << homography << endl << endl;
+		
+		// same, but using absolute camera poses instead of camera displacement, just for check
+		cv::Mat homography_euclidean2 = computeHomography(R1, T1, R2, T2, d_inv1, normal1);
+		cv::Mat homography2 = instrinsic_mat * homography_euclidean2 * instrinsic_mat.inv();
+
+		cout << "homography_euclidean2 = " << endl << " " << homography_euclidean2 << endl << endl;
+		cout << "homography2 = " << endl << " " << homography2 << endl << endl;
+		
+		homography_euclidean2 /= homography_euclidean2.at<double>(2,2);
+		homography2 /= homography2.at<double>(2,2);
+		
+		cout << "homography_euclidean2 = " << endl << " " << homography_euclidean2 << endl << endl;
+		cout << "homography2 = " << endl << " " << homography2 << endl << endl;
+	}
+
+
+	// print out the outlier frames
+	cout << "number of outlier frames:   " << outlierFrames.size() << endl;
+	cout << "indices of outlier frames:  ";
+
+	for( uint32_t n=0; n < outlierFrames.size(); n++ )
+		cout << outlierFrames[n] << " ";
+
+	cout << endl;
 
 	return 0;
 }
+
