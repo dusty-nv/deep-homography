@@ -54,7 +54,7 @@ void extractTranslation( const cv::Mat& pose, cv::Mat& t )
 
 void readme()
 {
-	cout << "Usage: ./make_homography_data_kitti <dataset_directory> <int_patch_size> <int_max_jitter> <n_samples> <bool_show_plots>" << endl;
+	cout << "Usage: ./make_homography_data_kitti <dataset_directory> <sequence> <int_patch_size> <int_max_jitter> <n_samples> <bool_show_plots>" << endl;
 }
 
 
@@ -63,7 +63,7 @@ int main( int argc, char **argv )
 	cout << "OpenCV Version: " << CV_MAJOR_VERSION << ".";
 	cout << CV_MINOR_VERSION << endl;
 
-	if( argc < 2 )
+	if( argc < 3 )
 	{
 		readme();
 		return -1;
@@ -73,7 +73,8 @@ int main( int argc, char **argv )
 	 * parse command line arguments
 	 */
 	const std::string dataset_path(argv[1]);
-	const std::string pose_path(dataset_path + "/poses/00.txt");
+	const std::string sequence(argv[2]);
+	const std::string pose_path(dataset_path + "/poses/" + sequence + ".txt");
 
 	cout << "data path:  " << dataset_path << endl;
 	cout << "pose path:  " << pose_path << endl << endl;
@@ -157,10 +158,12 @@ int main( int argc, char **argv )
 	/*
 	 * process each frame
 	 */	
+	const uint32_t framesAhead = 2;	// the number of frames ahead to compute the homography
+
 	std::vector<uint32_t> outlierFrames;
 	const double outlierThreshold = 15.0;
 
-	for( uint32_t n=0; n < numPoses-1; n++ )
+	for( uint32_t n=0; n < numPoses-framesAhead; n++ )
 	{
 		cout << "-----------------------------------------" << endl;
 		cout << "-- FRAME " << n << endl;
@@ -180,8 +183,8 @@ int main( int argc, char **argv )
 		cv::Mat R2(3, 3, CV_64FC1);
 		cv::Mat T2(3, 1, CV_64FC1);
 
-		extractRotation(poses[n+1], R2);
-		extractTranslation(poses[n+1], T2);
+		extractRotation(poses[n+framesAhead], R2);
+		extractTranslation(poses[n+framesAhead], T2);
 
 		cout << "R2 = " << endl << " " << R2 << endl << endl;
 		cout << "T2 = " << endl << " " << T2 << endl << endl;
@@ -192,8 +195,8 @@ int main( int argc, char **argv )
 
 		computeC2MC1(R1, T1, R2, T2, R_1to2, T_1to2);
 
-		cout << "R_1to2 rows: " << R_1to2.rows << " cols: " << R_1to2.cols << endl;
-		cout << "T_1to2 rows: " << T_1to2.rows << " cols: " << T_1to2.cols << endl << endl;
+		//cout << "R_1to2 rows: " << R_1to2.rows << " cols: " << R_1to2.cols << endl;
+		//cout << "T_1to2 rows: " << T_1to2.rows << " cols: " << T_1to2.cols << endl << endl;
 
 		cout << "R_1to2 = " << endl << " " << R_1to2 << endl << endl;
 		cout << "T_1to2 = " << endl << " " << T_1to2 << endl << endl;
@@ -220,16 +223,18 @@ int main( int argc, char **argv )
 		cv::Mat homography_euclidean = computeHomography(R_1to2, T_1to2, d_inv1, normal1);
 		cv::Mat homography = instrinsic_mat * homography_euclidean * instrinsic_mat.inv();
 
-		cout << "homography_euclidean = " << endl << " " << homography_euclidean << endl << endl;
-		cout << "homography = " << endl << " " << homography << endl << endl;
-		
+		//cout << "homography_euclidean = " << endl << " " << homography_euclidean << endl << endl;
+		//cout << "homography = " << endl << " " << homography << endl << endl;
+
+#if 1		
 		homography_euclidean /= homography_euclidean.at<double>(2,2);
 		homography /= homography.at<double>(2,2);
-
-		cout << "homography_euclidean = " << endl << " " << homography_euclidean << endl << endl;
+#endif
+		//cout << "homography_euclidean = " << endl << " " << homography_euclidean << endl << endl;
 		cout << "homography = " << endl << " " << homography << endl << endl;
 		
 		// same, but using absolute camera poses instead of camera displacement, just for check
+#if 0
 		cv::Mat homography_euclidean2 = computeHomography(R1, T1, R2, T2, d_inv1, normal1);
 		cv::Mat homography2 = instrinsic_mat * homography_euclidean2 * instrinsic_mat.inv();
 
@@ -241,6 +246,82 @@ int main( int argc, char **argv )
 		
 		cout << "homography_euclidean2 = " << endl << " " << homography_euclidean2 << endl << endl;
 		cout << "homography2 = " << endl << " " << homography2 << endl << endl;
+#endif
+
+		// test the homography transform
+		const int img_width  = 1241;
+		const int img_height = 376;
+
+		std::vector<cv::Point2f> pts1;
+		std::vector<cv::Point2f> pts2;
+
+		pts1.resize(4);
+		pts2.resize(4);
+
+		pts1[0].x = 0.0f;       pts1[0].y = 0.0f;
+		pts1[1].x = img_width;  pts1[1].y = 0.0f;
+		pts1[2].x = img_width;  pts1[2].y = img_height;
+		pts1[3].x = 0.0f;       pts1[3].y = img_height;
+
+		cv::perspectiveTransform(pts1, pts2, homography);
+
+		cout << "Corner points transformed by homography = " << endl;
+
+		for( uint32_t i=0; i < pts2.size(); i++ )
+			cout << "  " << pts1[i] << " -> " << pts2[i] << endl;
+
+		cout << endl;
+
+
+		// load the images for visualization
+		char img1_path[512];
+		char img2_path[512];
+
+		sprintf(img1_path, "%s/sequences/%s/image_0/%06u.png", dataset_path.c_str(), sequence.c_str(), n);
+		sprintf(img2_path, "%s/sequences/%s/image_0/%06u.png", dataset_path.c_str(), sequence.c_str(), n+framesAhead);
+		
+		cv::Mat img1 = cv::imread(img1_path);
+		cv::Mat img2 = cv::imread(img2_path);
+
+		if( !img1.data )
+		{
+			cout << "failed to load image " << img1_path << endl;
+			continue;
+		}
+
+		if( !img2.data )
+		{
+			cout << "failed to load image " << img1_path << endl;
+			continue;
+		}
+
+		// warp the input image by the homography
+		cv::Mat img1_warp;
+    		cv::warpPerspective(img1, img1_warp, homography.inv(), img1.size());
+	
+		// apply some overlay text to the images
+		char img_label[128];
+
+		sprintf(img_label, "Frame #%u", n);
+
+		cv::putText(img1, img_label, cvPoint(10,40), 
+    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+
+		sprintf(img_label, "Frame #%u", n+framesAhead);
+
+		cv::putText(img2, img_label, cvPoint(10,40), 
+    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+
+		cv::putText(img1_warp, "Warped", cvPoint(10,40), 
+    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+
+		// display the warped images
+		cv::Mat img_compare;
+
+		cv::hconcat(img1, img2, img_compare);
+		cv::hconcat(img_compare, img1_warp, img_compare);
+		cv::imshow("Comparision of camera image warped by homography", img_compare);
+		cv::waitKey(/*1*/);
 	}
 
 
