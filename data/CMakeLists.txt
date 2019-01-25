@@ -13,5 +13,8 @@ target_link_libraries( make_homography_data_coco ${OpenCV_LIBS} stdc++fs)
 add_executable( make_homography_data_kitti make_homography_data_kitti.cc) 
 target_link_libraries( make_homography_data_kitti ${OpenCV_LIBS} stdc++fs)
 
+add_executable( make_homography_sequence make_homography_sequence.cc) 
+target_link_libraries( make_homography_sequence ${OpenCV_LIBS} stdc++fs)
+
 add_executable( test_pnp test_pnp.cc) 
 target_link_libraries( test_pnp ${OpenCV_LIBS} stdc++fs)
