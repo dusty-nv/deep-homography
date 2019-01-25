@@ -297,7 +297,7 @@ int main( int argc, char **argv )
 
 		// warp the input image by the homography
 		cv::Mat img1_warp;
-    		cv::warpPerspective(img1, img1_warp, homography.inv(), img1.size());
+    		cv::warpPerspective(img1, img1_warp, homography, img1.size());
 	
 		// apply some overlay text to the images
 		char img_label[128];
