@@ -62,9 +62,15 @@ int main( int argc, char **argv )
 	/*
 	 * create ORB feature detector
 	 */
-	//cv::Ptr<cv::ORB> feature_detector = cv::ORB::create(4096);
+#ifdef USE_ORB
+	cv::Ptr<cv::ORB> feature_detector = cv::ORB::create(4096);
+#else
+	const float akaze_threshold = 0.0001;
+	const int   akaze_octaves   = 4;
+
 	cv::Ptr<cv::AKAZE> feature_detector = cv::AKAZE::create( cv::AKAZE::DESCRIPTOR_MLDB, 0, 3,
-												  0.0001f, 4, 4 );
+												  akaze_threshold, akaze_octaves, akaze_octaves );
+#endif
 
 	if( !feature_detector )
 	{
@@ -105,20 +111,29 @@ int main( int argc, char **argv )
 		sprintf(img1_path, dataset_path.c_str(), img1_index);
 		sprintf(img2_path, dataset_path.c_str(), img2_index);
 
-		cv::Mat img1 = cv::imread(img1_path/*, cv::IMREAD_GRAYSCALE*/);
-		cv::Mat img2 = cv::imread(img2_path/*, cv::IMREAD_GRAYSCALE*/);
+		cv::Mat img1_org = cv::imread(img1_path/*, cv::IMREAD_GRAYSCALE*/);
+		cv::Mat img2_org = cv::imread(img2_path/*, cv::IMREAD_GRAYSCALE*/);
 
-		if( !img1.data )
+		if( !img1_org.data )
 		{
 			cout << "failed to load image " << img1_path << endl;
 			break;
 		}
 
-		if( !img2.data )
+		if( !img2_org.data )
 		{
 			cout << "failed to load image " << img1_path << endl;
 			break;
 		}
+
+		// downscale images
+		const double scale_factor = 0.3;
+
+		cv::Mat img1;
+		cv::Mat img2;
+
+		cv::resize(img1_org, img1, cv::Size(), scale_factor, scale_factor, cv::INTER_AREA);
+		cv::resize(img2_org, img2, cv::Size(), scale_factor, scale_factor, cv::INTER_AREA);
 
 	
 		/*
@@ -130,8 +145,8 @@ int main( int argc, char **argv )
 		feature_detector->detect(img1, img1_keypoints);
 		feature_detector->detect(img2, img2_keypoints);
 
-		cout << "frame # " << img1_index << "  keypoints detected = " << img1_keypoints.size() << endl;
-		cout << "frame # " << img2_index << "  keypoints detected = " << img2_keypoints.size() << endl;
+		cout << "frame #" << img1_index << "  keypoints detected = " << img1_keypoints.size() << endl;
+		cout << "frame #" << img2_index << "  keypoints detected = " << img2_keypoints.size() << endl;
 
 
 		/*
@@ -155,7 +170,7 @@ int main( int argc, char **argv )
 		feature_matcher->knnMatch(img1_descriptors, img2_descriptors, matches, 2);
 		feature_matcher->clear();
 
-		cout << "frame # " << img1_index << "  matches = " << matches.size() << endl;
+		cout << "frame #" << img1_index << "  matches = " << matches.size() << endl;
 
 #if 0
 		// calculate the min/max distance between matched keypoints
@@ -196,7 +211,7 @@ int main( int argc, char **argv )
 			//}
 		}
 
-		cout << "frame # " << img1_index << "  filtered matches = " << img1_matched_keypoints.size() << endl;
+		cout << "frame #" << img1_index << "  filtered matches = " << img1_matched_keypoints.size() << endl;
 
 
 		// convert to Point2f for cv::findHomography()
@@ -218,12 +233,14 @@ int main( int argc, char **argv )
 
 		if( img1_matched_points.size() < 4 )
 		{
-			cout << "frame # " << "  not enough matches to compute homography" << endl;
+			cout << "frame #" << "  not enough matches to compute homography" << endl;
 			continue;
 		}
 
 		// TODO:  use RANSAC in a first step with a large reprojection error (to get a rough estimate) 
 		//        in order to detect the spurious matchings then use LMEDS on the correct ones.
+		// TODO:  try using findEssentialMatrix() or findFundamentalMatrix()
+		//          https://github.com/vivekseth/blog-posts/tree/master/Difference-between-perspective-transform-homography-essential-matrix-fundamental-matrix#essential-matrix
 		H = cv::findHomography( img1_matched_points, img2_matched_points,
 						    /*cv::RANSAC*/ cv::LMEDS, 3.0, inlier_mask, 50000, 0.99999 );
 
@@ -241,13 +258,13 @@ int main( int argc, char **argv )
 			}
 		}		
 
-		cout << "frame # " << img1_index << "  inlier matches = " << img1_inlier_keypoints.size() << endl;
+		cout << "frame #" << img1_index << "  inlier matches = " << img1_inlier_keypoints.size() << endl;
 
 
 		// check for valid homography
 		if( H.empty() )
 		{
-			cout << "frame # " << "  failed to compute valid homography" << endl;
+			cout << "frame #" << img1_index << "  failed to compute valid homography" << endl;
 			continue;
 		}
 
@@ -271,7 +288,19 @@ int main( int argc, char **argv )
 		cout << "Corner points transformed by H = " << endl;
 
 		for( uint32_t i=0; i < pts2.size(); i++ )
-			cout << "  " << pts1[i] << " -> " << pts2[i] << endl;
+		{
+			cout << "  " << pts1[i] << " -> " << pts2[i];
+
+			const double max_displacement = 32.0;
+
+			const double dx = pts2[i].x - pts1[i].x;
+			const double dy = pts2[i].y - pts1[i].y;
+
+			if( std::fabs(dx) > max_displacement || std::fabs(dy) > max_displacement )
+				cout << "   (max displacement of " << max_displacement << "px exceeded)";
+
+			cout << endl;
+		}
 
 		cout << endl;
 
