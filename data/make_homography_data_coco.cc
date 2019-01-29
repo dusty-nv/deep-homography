@@ -45,9 +45,12 @@ int main(int argc, char **argv ){
   std::mt19937 gen(seed);
  
   int cnt = 0; 
-  char f_roi_orig[50];
-  char f_roi_warp[50];
-  char f_number[9];
+
+  char f_roi_orig[128];
+  char f_roi_warp[128];
+  char f_number_orig[128];
+  char f_number_warp[128];
+
   std::ofstream f_labels("../label_file.txt");
   
   bool had_enough = false;
@@ -65,11 +68,14 @@ int main(int argc, char **argv ){
 
       if (img.rows > 220 && img.cols > 300){
         // the new files
-        sprintf(f_number, "%09d", cnt);
-        sprintf(f_roi_orig, "../synth_data/%09d_orig.jpg", cnt);
-        sprintf(f_roi_warp, "../synth_data/%09d_warp.jpg", cnt);
+        sprintf(f_number_orig, "%09d_orig.jpg", cnt);
+        sprintf(f_number_warp, "%09d_warp.jpg", cnt);
+
+        sprintf(f_roi_orig, "../synth_data/%s", f_number_orig);
+        sprintf(f_roi_warp, "../synth_data/%s", f_number_warp);
+
         //cout << f_roi_orig << endl;
-        f_labels << f_number << ";";
+        f_labels << f_number_orig << ";" << f_number_warp << ";";
 
         // patch and jittered patch
         Patch patch(img, patch_size, max_jitter);

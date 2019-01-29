@@ -21,10 +21,10 @@ def main(args):
   total_it = args.total_it
 
   device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-  print(device)
+  print('running on device ' + str(device))
 
-  dataset_train = HomographyDataset(val_frac=val_frac, mode='train')
-  dataset_eval = HomographyDataset(val_frac=val_frac, mode='eval')
+  dataset_train = HomographyDataset(args.image_path, args.label_path, val_frac=val_frac, mode='train')
+  dataset_eval = HomographyDataset(args.image_path, args.label_path, val_frac=val_frac, mode='eval')
 
   dataloader_train= DataLoader(
     dataset_train,
@@ -49,7 +49,7 @@ def main(args):
   while n_it < total_it: 
     train(dataloader_train, device, net, criterion, optimizer, n_it)
     n_it += len(dataloader_train)
-    test(dataloader_eval, device, net, criterion, n_it)
+    test(dataloader_eval, device, net, criterion, n_it, args.model_path)
    
     if lr_it >= 30000:
       d = optimizer.state_dict()
@@ -61,17 +61,19 @@ def main(args):
 def train(dataloader_train, device, net, criterion, optimizer, n_it):
   net.train()
   for i, data in enumerate(dataloader_train):
-    #print('train iter {:d}  {:d} / {:d}'.format(n_it, i, len(dataloader_train)))
+    print('train iter {:d}  {:d} / {:d}'.format(n_it, i, len(dataloader_train)))
     optimizer.zero_grad()
     inputs, labels = data['image'].to(device), data['label'].to(device)
    
     outputs = net(inputs)
+    print(outputs.size())
+    print(labels.size())
     loss = criterion(outputs, labels)
     loss.backward()
     optimizer.step()
 
 
-def test(dataloader_eval, device, net, criterion, n_it):
+def test(dataloader_eval, device, net, criterion, n_it, model_path):
   net.eval()
   with torch.no_grad():
 
@@ -83,12 +85,17 @@ def test(dataloader_eval, device, net, criterion, n_it):
       running_loss += loss.item()
     running_loss /= len(dataloader_eval)
   
-    torch.save(net.state_dict(), 'homography_model_{:d}.pytorch'.format(n_it))
+    torch.save(net.state_dict(), model_path)
+    torch.save(net.state_dict(), '{:s}.{:d}'.format(model_path, n_it))
+
     print('test iter {:d}  loss:  {:0.4f}'.format(n_it, running_loss))
 
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
+  parser.add_argument('--image_path', type=str, default='data/synth_data')
+  parser.add_argument('--label_path', type=str, default='data/label_file.txt')
+  parser.add_argument('--model_path', type=str, default='deep_homography.pytorch')
   parser.add_argument('--epochs', type=int, default=2)
   parser.add_argument('--batch_size', type=int, default=64)
   parser.add_argument('--val_frac', type=float, default=0.01)

@@ -156,15 +156,29 @@ int main( int argc, char **argv )
 		}
 
 		// save the rescaled image if desired
+		char img1_file_out[512];
+		char img2_file_out[512];
+
+		sprintf(img1_file_out, "%09u.png", img1_index);
+		sprintf(img2_file_out, "%09u.png", img2_index);
+
 		if( !dataset_out_path.empty() )
 		{
-			char img1_out_path[512];
-			sprintf(img1_out_path, dataset_out_path.c_str(), img1_index);
+			char img1_path_out[512];
+			char img2_path_out[512];
 
-			if( cv::imwrite(img1_out_path, img1) )
-				cout << "frame #" << img1_index << " saved to " << img1_out_path << endl << endl;
+			sprintf(img1_path_out, "%s/%s", dataset_out_path.c_str(), img1_file_out);
+			sprintf(img2_path_out, "%s/%s", dataset_out_path.c_str(), img2_file_out);
+
+			if( cv::imwrite(img1_path_out, img1) )
+				cout << "frame #" << img1_index << " saved to " << img1_path_out << endl << endl;
 			else
-				cout << "frame #" << img1_index << " failed to save to " << img1_out_path << endl << endl;
+				cout << "frame #" << img1_index << " failed to save to " << img1_path_out << endl << endl;
+
+			if( cv::imwrite(img2_path_out, img2) )
+				cout << "frame #" << img2_index << " saved to " << img2_path_out << endl << endl;
+			else
+				cout << "frame #" << img2_index << " failed to save to " << img2_path_out << endl << endl;
 		}
 	
 
@@ -302,7 +316,7 @@ int main( int argc, char **argv )
 
 		cout << endl << "H = " << endl << " " << H << endl << endl;
 
-		
+
 		// test the homography transform
 		std::vector<cv::Point2f> pts1;
 		std::vector<cv::Point2f> pts2;
@@ -318,6 +332,8 @@ int main( int argc, char **argv )
 		cv::perspectiveTransform(pts1, pts2, H);
 
 		cout << "Corner points transformed by H = " << endl;
+
+		labels_file << img1_file_out << ";" << img2_file_out << ";";
 
 		for( uint32_t i=0; i < pts2.size(); i++ )
 		{
@@ -393,7 +409,7 @@ int main( int argc, char **argv )
 		
 		// display the composted image
 		cv::imshow("Keypoints", img_overlay_composted);
-		cv::waitKey(/*1*/);
+		cv::waitKey(1);
 
 		// increment next frame index
 		img_index++;

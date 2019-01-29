@@ -29,13 +29,23 @@ class Normalize:
 
 
 class HomographyDataset(Dataset):
-  def __init__(self, val_frac=0.05, mode='train', img_dir='data/synth_data'): 
-    assert os.path.isdir(img_dir), 'Download the MSCOCO dataset and prepare it' 
-    self.transforms = transforms.Compose([
-      Normalize()])
+  def __init__(self, image_path, label_path, val_frac=0.05, mode='train'): 
+    self.image_path = image_path
+    self.label_path = label_path
+
+    print('image mode = ' + mode)
+    print('image path = ' + image_path)
+    print('label path = ' + label_path)
+
+    assert os.path.isdir(image_path), 'Dataset is missing'
+    assert os.path.isfile(label_path), 'Label file is missing'
+
+    self.transforms = transforms.Compose([Normalize()])
   
-    with open('data/label_file.txt', 'r') as f:
+    with open(label_path, 'r') as f:
       num_and_label = [line.rstrip().rstrip(',').split(';') for line in f]
+
+    #print(num_and_label)
 
     L = len(num_and_label)
     idx = int(val_frac*L)
@@ -51,15 +61,17 @@ class HomographyDataset(Dataset):
     return len(self.num_and_label)
 
   def __getitem__(self, idx):
-    num = self.num_and_label[idx][0]
-    input_file_orig = 'data/synth_data/{:s}_orig.jpg'.format(num)
-    input_file_warp = 'data/synth_data/{:s}_warp.jpg'.format(num)
+    input_file_orig = '{:s}/{:s}'.format(self.image_path, self.num_and_label[idx][0])
+    input_file_warp = '{:s}/{:s}'.format(self.image_path, self.num_and_label[idx][1])
+
     img_orig = jpg_reader(input_file_orig)
     img_warp = jpg_reader(input_file_warp)
+
     img = np.concatenate([img_orig[:,:,None], img_warp[:,:,None]], axis=2).astype(np.float32)
    
-    label_str = self.num_and_label[idx][1] 
+    label_str = self.num_and_label[idx][2] 
     label = np.array([float(el) for el in label_str.split(',')]).astype(np.float32)
+
     sample = {
       'image': img,
       'label': label}
