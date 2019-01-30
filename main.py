@@ -61,13 +61,18 @@ def main(args):
 def train(dataloader_train, device, net, criterion, optimizer, n_it):
   net.train()
   for i, data in enumerate(dataloader_train):
-    print('train iter {:d}  {:d} / {:d}'.format(n_it, i, len(dataloader_train)))
+    if i % 1000 == 0:
+       print('train iter {:d}  {:d} / {:d}'.format(n_it, i, len(dataloader_train)))
+
     optimizer.zero_grad()
     inputs, labels = data['image'].to(device), data['label'].to(device)
    
     outputs = net(inputs)
-    print(outputs.size())
-    print(labels.size())
+
+    #print('inputs size = ' + str(inputs.size()))
+    #print('output size = ' + str(outputs.size()))
+    #print('labels size = ' + str(labels.size()))
+
     loss = criterion(outputs, labels)
     loss.backward()
     optimizer.step()

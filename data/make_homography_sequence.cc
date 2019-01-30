@@ -3,7 +3,7 @@
 #include <vector>
 #include <chrono>
 #include <random>
-#include <experimental/filesystem>
+#include <dirent.h> 
 
 #include "opencv2/opencv_modules.hpp"
 #include "opencv2/core/core.hpp"
@@ -12,61 +12,29 @@
 
 #include "opencv2/features2d.hpp"
 
+
 using std::cout;
 using std::endl;
 
+uint32_t dir_count = 0;	// total number of subdirs with files processed
+uint32_t img_count = 0;	// total number of frames been processed
+uint32_t img_ahead = 1;	// number of images ahead to compare against
 
-//using namespace cv;
-namespace fs = std::experimental::filesystem;
+std::string   dataset_out_path;
+std::ofstream labels_file;
 
 
-void readme()
+// estimate homographies for the provided image files
+int process_files( const std::vector<std::string>& img_files )
 {
-	cout << "Usage: ./make_homography_sequence <dataset_in_path> <scaled_dataset_out_path> <labels_out_path>" << endl;
-}
-
-
-int main( int argc, char **argv )
-{
-	cout << "OpenCV Version: " << CV_MAJOR_VERSION << ".";
-	cout << CV_MINOR_VERSION << endl;
-
-	if( argc < 4 )
-	{
-		readme();
-		return -1;
-	}
-
 	/*
-	 * parse command line arguments
+	 * make sure there are enough files to process
 	 */
-	const std::string dataset_path(argv[1]);
-	const std::string dataset_out_path(argv[2]);
-	const std::string labels_path(argv[3]);
-
-	cout << "dataset input path:  " << dataset_path << endl;
-	cout << "scaled dataset output path:  " << dataset_out_path << endl;
-	cout << "training labels output path:  " << labels_path << endl;
-
-	std::ofstream labels_file(labels_path);
-
+	if( img_files.size() < img_ahead + 1 )
+		return 0;
 
 	/*
-	 * camera instrinsic calibration
-	 * note:  sequences 0-2 of the dataset have the same calibration
-	 *        add support for reading this from the calib.txt files
-	 */
-	cv::Mat instrinsic_mat = (cv::Mat_<double>(3,3) << 
-			7.188560000000e+02, 0.000000000000e+00, 6.071928000000e+02,
-			0.000000000000e+00, 7.188560000000e+02, 1.852157000000e+02, 
-			0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00);
-
-	cout << "camera intrinsic calibration = " << endl << " " << instrinsic_mat << endl << endl;
-
-
-
-	/*
-	 * create ORB feature detector
+	 * create feature detector
 	 */
 #ifdef USE_ORB
 	cv::Ptr<cv::ORB> feature_detector = cv::ORB::create(4096);
@@ -100,10 +68,9 @@ int main( int argc, char **argv )
 	/*
 	 * generate homography for all images in directory
 	 */
-	uint32_t img_index = 0;	// current index of image being processed
-	uint32_t img_ahead = 1;	// number of images ahead to compare against
+	const uint32_t num_images = img_files.size();
 
-	while(true)
+	for( uint32_t img_index=0; img_index < num_images - img_ahead; img_index++ )
 	{
 		/*
 		 * attempt to load this pair of images
@@ -111,24 +78,18 @@ int main( int argc, char **argv )
 		const uint32_t img1_index = img_index;
 		const uint32_t img2_index = img_index + img_ahead;
 
-		char img1_path[512];
-		char img2_path[512];
-
-		sprintf(img1_path, dataset_path.c_str(), img1_index);
-		sprintf(img2_path, dataset_path.c_str(), img2_index);
-
-		cv::Mat img1_org = cv::imread(img1_path, cv::IMREAD_GRAYSCALE);
-		cv::Mat img2_org = cv::imread(img2_path, cv::IMREAD_GRAYSCALE);
+		cv::Mat img1_org = cv::imread(img_files[img1_index], cv::IMREAD_GRAYSCALE);
+		cv::Mat img2_org = cv::imread(img_files[img2_index], cv::IMREAD_GRAYSCALE);
 
 		if( !img1_org.data )
 		{
-			cout << "failed to load image " << img1_path << endl;
+			cout << "failed to load image " << img_files[img1_index] << endl;
 			break;
 		}
 
 		if( !img2_org.data )
 		{
-			cout << "failed to load image " << img1_path << endl;
+			cout << "failed to load image " << img_files[img2_index] << endl;
 			break;
 		}
 
@@ -139,6 +100,9 @@ int main( int argc, char **argv )
 		const double scale_factor  = 0.3;
 		const double inverse_scale = 1.0 / scale_factor;
 
+		const cv::Size img_size_org(img1_org.cols, img1_org.rows);
+		const cv::Size img_size_scaled(128, 128);
+
 		cv::Mat img1;
 		cv::Mat img2;
 
@@ -146,8 +110,8 @@ int main( int argc, char **argv )
 		{
 			const int interpolation_method = scale_factor < 1.0 ? cv::INTER_AREA : cv::INTER_CUBIC;
 
-			cv::resize(img1_org, img1, cv::Size(), scale_factor, scale_factor, interpolation_method);
-			cv::resize(img2_org, img2, cv::Size(), scale_factor, scale_factor, interpolation_method);
+			cv::resize(img1_org, img1, img_size_scaled/*cv::Size()*/, scale_factor, scale_factor, interpolation_method);
+			cv::resize(img2_org, img2, img_size_scaled/*cv::Size()*/, scale_factor, scale_factor, interpolation_method);
 		}
 		else
 		{
@@ -159,8 +123,8 @@ int main( int argc, char **argv )
 		char img1_file_out[512];
 		char img2_file_out[512];
 
-		sprintf(img1_file_out, "%09u.png", img1_index);
-		sprintf(img2_file_out, "%09u.png", img2_index);
+		sprintf(img1_file_out, "%09u.png", dir_count * 10000000 + img_count);
+		sprintf(img2_file_out, "%09u.png", dir_count * 10000000 + img_count + 1);
 
 		if( !dataset_out_path.empty() )
 		{
@@ -171,14 +135,14 @@ int main( int argc, char **argv )
 			sprintf(img2_path_out, "%s/%s", dataset_out_path.c_str(), img2_file_out);
 
 			if( cv::imwrite(img1_path_out, img1) )
-				cout << "frame #" << img1_index << " saved to " << img1_path_out << endl << endl;
+				cout << "dir #" << dir_count << ", frame #" << img1_index << " saved to " << img1_path_out << endl << endl;
 			else
-				cout << "frame #" << img1_index << " failed to save to " << img1_path_out << endl << endl;
+				cout << "dir #" << dir_count << ", frame #" << img1_index << " failed to save to " << img1_path_out << endl << endl;
 
 			if( cv::imwrite(img2_path_out, img2) )
-				cout << "frame #" << img2_index << " saved to " << img2_path_out << endl << endl;
+				cout << "dir #" << dir_count << ", frame #" << img2_index << " saved to " << img2_path_out << endl << endl;
 			else
-				cout << "frame #" << img2_index << " failed to save to " << img2_path_out << endl << endl;
+				cout << "dir #" << dir_count << ", frame #" << img2_index << " failed to save to " << img2_path_out << endl << endl;
 		}
 	
 
@@ -191,8 +155,8 @@ int main( int argc, char **argv )
 		feature_detector->detect(img1, img1_keypoints);
 		feature_detector->detect(img2, img2_keypoints);
 
-		cout << "frame #" << img1_index << "  keypoints detected = " << img1_keypoints.size() << endl;
-		cout << "frame #" << img2_index << "  keypoints detected = " << img2_keypoints.size() << endl;
+		cout << "dir #" << dir_count << ", frame #" << img1_index << "  keypoints detected = " << img1_keypoints.size() << endl;
+		cout << "dir #" << dir_count << ", frame #" << img2_index << "  keypoints detected = " << img2_keypoints.size() << endl;
 
 
 		/*
@@ -216,7 +180,7 @@ int main( int argc, char **argv )
 		feature_matcher->knnMatch(img1_descriptors, img2_descriptors, matches, 2);
 		feature_matcher->clear();
 
-		cout << "frame #" << img1_index << "  matches = " << matches.size() << endl;
+		cout << "dir #" << dir_count << ", frame #" << img1_index << "  matches = " << matches.size() << endl;
 
 #if 0
 		// calculate the min/max distance between matched keypoints
@@ -257,7 +221,7 @@ int main( int argc, char **argv )
 			//}
 		}
 
-		cout << "frame #" << img1_index << "  filtered matches = " << img1_matched_keypoints.size() << endl;
+		cout << "dir #" << dir_count << ", frame #" << img1_index << "  filtered matches = " << img1_matched_keypoints.size() << endl;
 
 
 		// convert to Point2f for cv::findHomography()
@@ -279,7 +243,7 @@ int main( int argc, char **argv )
 
 		if( img1_matched_points.size() < 4 )
 		{
-			cout << "frame #" << "  not enough matches to compute homography" << endl;
+			cout << "dir #" << dir_count << ", frame #" << "  not enough matches to compute homography" << endl;
 			continue;
 		}
 
@@ -304,13 +268,13 @@ int main( int argc, char **argv )
 			}
 		}		
 
-		cout << "frame #" << img1_index << "  inlier matches = " << img1_inlier_keypoints.size() << endl;
+		cout << "dir #" << dir_count << ", frame #" << img1_index << "  inlier matches = " << img1_inlier_keypoints.size() << endl;
 
 
 		// check for valid homography
 		if( H.empty() )
 		{
-			cout << "frame #" << img1_index << "  failed to compute valid homography" << endl;
+			cout << "dir #" << dir_count << ", frame #" << img1_index << "  failed to compute valid homography" << endl;
 			continue;
 		}
 
@@ -379,10 +343,10 @@ int main( int argc, char **argv )
 		{
 			const int interpolation_method = inverse_scale < 1.0 ? cv::INTER_AREA : cv::INTER_CUBIC;
 
-			cv::resize(img1_overlay, img1_overlay, cv::Size(), inverse_scale, inverse_scale, interpolation_method);
-			cv::resize(img2_overlay, img2_overlay, cv::Size(), inverse_scale, inverse_scale, interpolation_method);
+			cv::resize(img1_overlay, img1_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+			cv::resize(img2_overlay, img2_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
 
-			cv::resize(img1_warped, img1_warped, cv::Size(), inverse_scale, inverse_scale, interpolation_method);
+			cv::resize(img1_warped, img1_warped, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
 		}
 
 		// apply some overlay text to the images
@@ -411,11 +375,163 @@ int main( int argc, char **argv )
 		cv::imshow("Keypoints", img_overlay_composted);
 		cv::waitKey(1);
 
-		// increment next frame index
-		img_index++;
+		// increment total frame count
+		img_count++;
 	}
 
+	dir_count++;
+}
+
+// returns true if the directory should be filtered out
+bool filter_dir( const char* name, const std::vector<std::string>& filters )
+{
+	if( !name )
+		return true;
+
+	if( strcmp(name, ".") == 0 || strcmp(name, "..") == 0 )
+		return true;
+
+	const uint32_t num_filters = filters.size();
+
+	for( uint32_t n=0; n < num_filters; n++ )
+	{
+		if( strcmp(name, filters[n].c_str()) == 0 )
+			return true;
+	}
+
+	return false;
+}
+
+// recursively transverse subdirectories except those filtered out
+void process_dir( const std::string& path, const std::vector<std::string>& filters )
+{
+	cout << path << endl;
+
+	// open this directory
+	DIR* dir = NULL;
+	struct dirent* dir_entry;
+	dir = opendir(path.c_str());
+
+	if( !dir )
+		return;
+
+	// keep track of subdirectories and files
+	std::vector<std::string> subdirs;
+	std::vector<std::string> files;
+
+	// enumerate all entries
+	while((dir_entry = readdir(dir)) != NULL) 
+	{
+		if( filter_dir(dir_entry->d_name, filters) )
+			continue;
+
+		const std::string qualified_path = path + "/" + std::string(dir_entry->d_name);
+
+		if( dir_entry->d_type == DT_DIR )
+			subdirs.push_back(qualified_path);
+		else if( dir_entry->d_type == DT_REG )
+			files.push_back(qualified_path);
+		
+			//process_dir(path + "/" + std::string(dir_entry->d_name), filters);
+	}
+
+	// close the directory
+	closedir(dir);
+
+	// sort subdirectories and filenames
+	std::sort(subdirs.begin(), subdirs.end());
+	std::sort(files.begin(), files.end());
+
+	// process all files
+	for( uint32_t n=0; n < files.size(); n++ )
+		cout << "   " << files[n] << endl;
+
+	process_files(files);
+
+	// process all subdirectories
+	for( uint32_t n=0; n < subdirs.size(); n++ )
+		process_dir(subdirs[n], filters);
+}
+
+
+// recursively transverse subdirectories until we find image files
+void process_dir( const std::string& path )
+{
+	std::vector<std::string> filters;
+	process_dir(path, filters);
+}
+
+
+
+void readme()
+{
+	cout << "Usage: ./make_homography_sequence <dataset_in_path> <scaled_dataset_out_path> <labels_out_path>" << endl;
+}
+
+
+int main( int argc, char **argv )
+{
+	cout << "OpenCV Version: " << CV_MAJOR_VERSION << ".";
+	cout << CV_MINOR_VERSION << endl;
+
+	if( argc < 4 )
+	{
+		readme();
+		return -1;
+	}
+
+	/*
+	 * parse command line arguments
+	 */
+	const std::string  dataset_path(argv[1]);
+   /*const std::string*/dataset_out_path = argv[2];
+	const std::string  labels_path(argv[3]);
+
+	cout << "dataset input path:  " << dataset_path << endl;
+	cout << "scaled dataset output path:  " << dataset_out_path << endl;
+	cout << "training labels output path:  " << labels_path << endl;
+
+	labels_file.open(labels_path);
+
+
+	/*
+	 * camera instrinsic calibration
+	 * note:  sequences 0-2 of the dataset have the same calibration
+	 *        add support for reading this from the calib.txt files
+	 */
+	cv::Mat instrinsic_mat = (cv::Mat_<double>(3,3) << 
+			7.188560000000e+02, 0.000000000000e+00, 6.071928000000e+02,
+			0.000000000000e+00, 7.188560000000e+02, 1.852157000000e+02, 
+			0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00);
+
+	cout << "camera intrinsic calibration = " << endl << " " << instrinsic_mat << endl << endl;
+
+
+	/*
+	 * setup filters
+	 */
+	std::vector<std::string> filters;
+	
+	filters.push_back("image_1");		// only process the left camera (image_0)
+	filters.push_back("calib.txt");
+	filters.push_back("times.txt");
+
+
+	/*
+	 * process all directories
+	 */
+	process_dir(dataset_path, filters);
+	
+	cout << "Done processing" << endl;
+	cout << "   " << dir_count << " directories" << endl;
+	cout << "   " << img_count << " images" << endl;
+
+
+	/*
+	 * cleanup
+	 */
 	labels_file.close();
+
 	return 0;
 }
 
