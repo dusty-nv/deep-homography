@@ -16,23 +16,30 @@
 using std::cout;
 using std::endl;
 
+enum HomographyMethod
+{
+	HOMOGRAPHY_FEATURE = 0,	// feature-based matching using ORB/AKAZE and cv::findHomography()
+	HOMOGRAPHY_PIXEL,		// direct pixel-based alignment using cv::findTransformECC()
+	HOMOGRAPHY_HYBRID		// first perform feature matching, then refine it with pixel method
+};
+
+HomographyMethod homography_method = HOMOGRAPHY_PIXEL;
+
 uint32_t dir_count = 0;	// total number of subdirs with files processed
 uint32_t img_count = 0;	// total number of frames been processed
 uint32_t img_ahead = 1;	// number of images ahead to compare against
 
-std::string   dataset_out_path;
-std::ofstream labels_file;
+std::string   dataset_out_path;	  // path to save the rescaled 8-bit mono images to
+std::ofstream labels_file;		  // path to save the homography displacements to
+
+bool display_visualization = false;  // when true, display a window visualizing the results
 
 
-// estimate homographies for the provided image files
-int process_files( const std::vector<std::string>& img_files )
+// find homography using feature matching
+bool find_homography_features( cv::Mat& img1, cv::Mat& img2, cv::Mat& H, 
+						 std::vector<cv::KeyPoint>& img1_keypoints, 
+						 std::vector<cv::KeyPoint>& img2_keypoints )
 {
-	/*
-	 * make sure there are enough files to process
-	 */
-	if( img_files.size() < img_ahead + 1 )
-		return 0;
-
 	/*
 	 * create feature detector
 	 */
@@ -54,7 +61,7 @@ int process_files( const std::vector<std::string>& img_files )
 
 
 	/*
-	 * create feature matching engine
+	 * create feature matcher
 	 */
 	cv::Ptr<cv::DescriptorMatcher> feature_matcher = cv::DescriptorMatcher::create("BruteForce-Hamming");
 
@@ -65,6 +72,178 @@ int process_files( const std::vector<std::string>& img_files )
 	}
 
 
+	/*
+	 * detect keypoints
+	 */
+	std::vector<cv::KeyPoint> img1_detected_keypoints;
+	std::vector<cv::KeyPoint> img2_detected_keypoints;
+
+	feature_detector->detect(img1, img1_detected_keypoints);
+	feature_detector->detect(img2, img2_detected_keypoints);
+
+	cout << "  keypoints detected = " << img1_detected_keypoints.size() << endl;
+	cout << "  keypoints detected = " << img2_detected_keypoints.size() << endl;
+
+
+	/*
+	 * extract descriptors
+	 */
+	cv::Mat img1_descriptors;
+	cv::Mat img2_descriptors;
+
+	feature_detector->compute(img1, img1_detected_keypoints, img1_descriptors);
+	feature_detector->compute(img2, img2_detected_keypoints, img2_descriptors);
+
+	//cout << "frame # " << img1_index << "  descriptors dimension = " << img1_descriptors.rows << "x" << img1_descriptors.cols << endl;
+	//cout << "frame # " << img2_index << "  descriptors dimension = " << img2_descriptors.rows << "x" << img2_descriptors.cols << endl;
+
+
+	/*
+	 * find and filter matches
+	 */
+	std::vector< std::vector<cv::DMatch> > matches;
+
+	feature_matcher->knnMatch(img1_descriptors, img2_descriptors, matches, 2);
+	feature_matcher->clear();
+
+	cout << "  matches = " << matches.size() << endl;
+
+#if 0
+	// calculate the min/max distance between matched keypoints
+	double max_distance = 0.0;
+	double min_distance = 1000.0;
+
+	for( uint32_t n=0; n < matches.size(); n++ )
+	{
+		const double distance = matches[n].distance;
+
+		if( distance < min_distance )
+			min_distance = distance;
+
+		if( distance > max_distance )
+			max_distance = distance;
+	}
+
+	// only accept matches whose distance is less than 3 * min_distance
+	const double distance_threshold = min_distance * 3.0;
+
+	for( uint32_t n=0; n < matches.size(); n++ )
+	{
+		if( matches[n].distance < distance_threshold )
+			good_matches.push_back(matches[n]);
+	}
+#endif
+
+	// filter by nearest-neighbour matching ratio
+	std::vector<cv::KeyPoint> img1_matched_keypoints;
+	std::vector<cv::KeyPoint> img2_matched_keypoints;
+	
+	for( uint32_t n=0; n < matches.size(); n++ )
+	{
+		//if( matches[n][0].distance < matches[n][1].distance * 0.8 )
+		//{
+			img1_matched_keypoints.push_back( img1_detected_keypoints[matches[n][0].queryIdx] );
+			img2_matched_keypoints.push_back( img2_detected_keypoints[matches[n][0].trainIdx] );
+		//}
+	}
+
+	cout << "  filtered matches = " << img1_matched_keypoints.size() << endl;
+
+
+	// convert to Point2f for cv::findHomography()
+	std::vector<cv::Point2f> img1_matched_points;
+	std::vector<cv::Point2f> img2_matched_points;
+
+	for( uint32_t n=0; n < img1_matched_keypoints.size(); n++ )
+	{
+		img1_matched_points.push_back( img1_matched_keypoints[n].pt );
+		img2_matched_points.push_back( img2_matched_keypoints[n].pt );
+	}
+	
+
+	/*
+	 * homography estimation
+	 */
+	cv::Mat inlier_mask;
+
+	if( img1_matched_points.size() < 4 )
+	{
+		cout << "  not enough matches to compute homography" << endl;
+		return false;
+	}
+
+	// TODO:  use RANSAC in a first step with a large reprojection error (to get a rough estimate) 
+	//        in order to detect the spurious matchings then use LMEDS on the correct ones.
+	// TODO:  try using findEssentialMatrix() or findFundamentalMatrix()
+	//          https://github.com/vivekseth/blog-posts/tree/master/Difference-between-perspective-transform-homography-essential-matrix-fundamental-matrix#essential-matrix
+	H = cv::findHomography( img1_matched_points, img2_matched_points,
+					    /*cv::RANSAC*/ cv::LMEDS, 3.0, inlier_mask, 50000, 0.99999 );
+
+
+	// unmask the inliers
+	std::vector<cv::KeyPoint> img1_inlier_keypoints;
+	std::vector<cv::KeyPoint> img2_inlier_keypoints;
+
+	for( uint32_t n=0; n < img1_matched_keypoints.size(); n++ )
+	{
+		if( inlier_mask.at<uchar>(n) )
+		{
+			img1_keypoints.push_back( img1_matched_keypoints[n] );
+			img2_keypoints.push_back( img2_matched_keypoints[n] );
+		}
+	}		
+
+	cout << "  inlier matches = " << img1_inlier_keypoints.size() << endl;
+
+
+	// check for valid homography
+	if( H.empty() )
+	{
+		cout << "  failed to compute valid homography" << endl;
+		return false;
+	}
+
+	return true;
+}
+
+
+// find homography using direct pixel-based alignment
+bool find_homography_pixel( cv::Mat& img1, cv::Mat& img2, cv::Mat& H )
+{
+	const cv::TermCriteria criteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 50, 0.001);
+	
+	try
+	{
+		const double cc = cv::findTransformECC(img1, img2, H, cv::MOTION_HOMOGRAPHY, criteria);
+
+		if( cc == -1 )
+		{
+			cout << "  error, pixel correlation coefficient is:  " << cc << endl;
+			cout << "  try the HOMOGRAPHY_HYBRID method to improve the initialization" << endl;
+			
+			return false;
+		}
+	}
+	catch( cv::Exception e ) 
+	{
+		cout << "cv::findTransformECC exception: " << e.err << endl;
+		return false;
+	}
+
+	return true;
+}
+
+
+// estimate homographies for the provided image files
+int process_files( const std::vector<std::string>& img_files )
+{
+	/*
+	 * make sure there are enough files to process
+	 */
+	if( img_files.size() < img_ahead + 1 )
+		return 0;
+
+	
 	/*
 	 * generate homography for all images in directory
 	 */
@@ -92,6 +271,10 @@ int process_files( const std::vector<std::string>& img_files )
 			cout << "failed to load image " << img_files[img2_index] << endl;
 			break;
 		}
+
+		cout << "/////////////////////////////////////////////////////" << endl;
+		cout << "// DIR #" << dir_count << ", FRAME #" << img1_index << endl;
+		cout << "/////////////////////////////////////////////////////" << endl;
 
 
 		/*
@@ -123,8 +306,8 @@ int process_files( const std::vector<std::string>& img_files )
 		char img1_file_out[512];
 		char img2_file_out[512];
 
-		sprintf(img1_file_out, "%09u.png", dir_count * 10000000 + img_count);
-		sprintf(img2_file_out, "%09u.png", dir_count * 10000000 + img_count + 1);
+		sprintf(img1_file_out, "%09u.png", dir_count * 1000000 + img_count);
+		sprintf(img2_file_out, "%09u.png", dir_count * 1000000 + img_count + 1);
 
 		if( !dataset_out_path.empty() )
 		{
@@ -147,141 +330,42 @@ int process_files( const std::vector<std::string>& img_files )
 	
 
 		/*
-		 * detect keypoints
+		 * feature-based alignment
 		 */
-		std::vector<cv::KeyPoint> img1_keypoints;
+		std::vector<cv::KeyPoint> img1_keypoints; 
 		std::vector<cv::KeyPoint> img2_keypoints;
 
-		feature_detector->detect(img1, img1_keypoints);
-		feature_detector->detect(img2, img2_keypoints);
+		cv::Mat H = cv::Mat::eye(3, 3, CV_32F);
 
-		cout << "dir #" << dir_count << ", frame #" << img1_index << "  keypoints detected = " << img1_keypoints.size() << endl;
-		cout << "dir #" << dir_count << ", frame #" << img2_index << "  keypoints detected = " << img2_keypoints.size() << endl;
-
-
-		/*
-		 * extract descriptors
-		 */
-		cv::Mat img1_descriptors;
-		cv::Mat img2_descriptors;
-
-		feature_detector->compute(img1, img1_keypoints, img1_descriptors);
-		feature_detector->compute(img2, img2_keypoints, img2_descriptors);
-
-		//cout << "frame # " << img1_index << "  descriptors dimension = " << img1_descriptors.rows << "x" << img1_descriptors.cols << endl;
-		//cout << "frame # " << img2_index << "  descriptors dimension = " << img2_descriptors.rows << "x" << img2_descriptors.cols << endl;
-
-
-		/*
-		 * find and filter matches
-		 */
-		std::vector< std::vector<cv::DMatch> > matches;
-
-		feature_matcher->knnMatch(img1_descriptors, img2_descriptors, matches, 2);
-		feature_matcher->clear();
-
-		cout << "dir #" << dir_count << ", frame #" << img1_index << "  matches = " << matches.size() << endl;
-
-#if 0
-		// calculate the min/max distance between matched keypoints
-		double max_distance = 0.0;
-		double min_distance = 1000.0;
-
-		for( uint32_t n=0; n < matches.size(); n++ )
+		if( homography_method == HOMOGRAPHY_FEATURE || homography_method == HOMOGRAPHY_HYBRID )
 		{
-			const double distance = matches[n].distance;
-
-			if( distance < min_distance )
-				min_distance = distance;
-
-			if( distance > max_distance )
-				max_distance = distance;
-		}
-
-		// only accept matches whose distance is less than 3 * min_distance
-		const double distance_threshold = min_distance * 3.0;
-
-		for( uint32_t n=0; n < matches.size(); n++ )
-		{
-			if( matches[n].distance < distance_threshold )
-				good_matches.push_back(matches[n]);
-		}
-#endif
-
-		// filter by nearest-neighbour matching ratio
-		std::vector<cv::KeyPoint> img1_matched_keypoints;
-		std::vector<cv::KeyPoint> img2_matched_keypoints;
-		
-		for( uint32_t n=0; n < matches.size(); n++ )
-		{
-			//if( matches[n][0].distance < matches[n][1].distance * 0.8 )
-			//{
-				img1_matched_keypoints.push_back( img1_keypoints[matches[n][0].queryIdx] );
-				img2_matched_keypoints.push_back( img2_keypoints[matches[n][0].trainIdx] );
-			//}
-		}
-
-		cout << "dir #" << dir_count << ", frame #" << img1_index << "  filtered matches = " << img1_matched_keypoints.size() << endl;
-
-
-		// convert to Point2f for cv::findHomography()
-		std::vector<cv::Point2f> img1_matched_points;
-		std::vector<cv::Point2f> img2_matched_points;
-
-		for( uint32_t n=0; n < img1_matched_keypoints.size(); n++ )
-		{
-			img1_matched_points.push_back( img1_matched_keypoints[n].pt );
-			img2_matched_points.push_back( img2_matched_keypoints[n].pt );
-		}
-		
-
-		/*
-		 * homography estimation
-		 */
-		cv::Mat inlier_mask;
-		cv::Mat H;
-
-		if( img1_matched_points.size() < 4 )
-		{
-			cout << "dir #" << dir_count << ", frame #" << "  not enough matches to compute homography" << endl;
-			continue;
-		}
-
-		// TODO:  use RANSAC in a first step with a large reprojection error (to get a rough estimate) 
-		//        in order to detect the spurious matchings then use LMEDS on the correct ones.
-		// TODO:  try using findEssentialMatrix() or findFundamentalMatrix()
-		//          https://github.com/vivekseth/blog-posts/tree/master/Difference-between-perspective-transform-homography-essential-matrix-fundamental-matrix#essential-matrix
-		H = cv::findHomography( img1_matched_points, img2_matched_points,
-						    /*cv::RANSAC*/ cv::LMEDS, 3.0, inlier_mask, 50000, 0.99999 );
-
-
-		// unmask the inliers
-		std::vector<cv::KeyPoint> img1_inlier_keypoints;
-		std::vector<cv::KeyPoint> img2_inlier_keypoints;
-
-		for( uint32_t n=0; n < img1_matched_keypoints.size(); n++ )
-		{
-			if( inlier_mask.at<uchar>(n) )
+			if( !find_homography_features(img1, img2, H, img1_keypoints, img2_keypoints) )
 			{
-				img1_inlier_keypoints.push_back( img1_matched_keypoints[n] );
-				img2_inlier_keypoints.push_back( img2_matched_keypoints[n] );
+				cout << "dir #" << dir_count << ", frame #" << img1_index << "  failed to estimate feature-based homography" << endl;
+				continue;
 			}
-		}		
-
-		cout << "dir #" << dir_count << ", frame #" << img1_index << "  inlier matches = " << img1_inlier_keypoints.size() << endl;
-
-
-		// check for valid homography
-		if( H.empty() )
-		{
-			cout << "dir #" << dir_count << ", frame #" << img1_index << "  failed to compute valid homography" << endl;
-			continue;
 		}
 
-		cout << endl << "H = " << endl << " " << H << endl << endl;
+
+		/*
+		 * direct pixel alignment
+		 */
+		if( homography_method == HOMOGRAPHY_PIXEL || homography_method == HOMOGRAPHY_HYBRID )
+		{
+			if( !find_homography_pixel(img1, img2, H) )
+			{
+				cout << "dir #" << dir_count << ", frame #" << img1_index << "  failed to estimate direct pixel homography" << endl;
+				continue;
+			}
+		}
 
 
-		// test the homography transform
+		cout << "H = " << endl << " " << H << endl << endl;
+
+
+		/*
+		 * calculate the displacement of the homography
+		 */
 		std::vector<cv::Point2f> pts1;
 		std::vector<cv::Point2f> pts2;
 
@@ -321,59 +405,67 @@ int process_files( const std::vector<std::string>& img_files )
 		cout << endl;
 
 
-		// warp the input image by the homography
-		cv::Mat img1_warped;
-
-    		cv::warpPerspective(img1, img1_warped, H, img1.size());
-		cv::cvtColor(img1_warped, img1_warped, cv::COLOR_GRAY2BGR);
-
-
 		/*
-		 * visualize results
+		 * render the GUI if requested
 		 */
-		cv::Mat img1_overlay;
-		cv::Mat img2_overlay;
-
-		// draw the keypoints
-		cv::drawKeypoints(img1, img1_inlier_keypoints, img1_overlay, cvScalar(0,255,0));
-		cv::drawKeypoints(img2, img2_inlier_keypoints, img2_overlay, cvScalar(0,255,0));
-
-		// rescale images to original size
-		if( scale_factor != 1.0 )
+		if( display_visualization )
 		{
-			const int interpolation_method = inverse_scale < 1.0 ? cv::INTER_AREA : cv::INTER_CUBIC;
+			/*
+			 * warp input image by the homography
+			 */
+			cv::Mat img1_warped;
 
-			cv::resize(img1_overlay, img1_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
-			cv::resize(img2_overlay, img2_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+	    		cv::warpPerspective(img1, img1_warped, H, img1.size());
+			cv::cvtColor(img1_warped, img1_warped, cv::COLOR_GRAY2BGR);
 
-			cv::resize(img1_warped, img1_warped, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
-		}
 
-		// apply some overlay text to the images
-		char img_label[128];
+			/*
+			 * visualize results
+			 */
+			cv::Mat img1_overlay;
+			cv::Mat img2_overlay;
 
-		sprintf(img_label, "Frame #%u", img1_index);
+			// draw the keypoints
+			cv::drawKeypoints(img1, img1_keypoints, img1_overlay, cvScalar(0,255,0));
+			cv::drawKeypoints(img2, img2_keypoints, img2_overlay, cvScalar(0,255,0));
 
-		cv::putText(img1_overlay, img_label, cvPoint(10,40), 
-    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+			// rescale images to original size
+			if( scale_factor != 1.0 )
+			{
+				const int interpolation_method = inverse_scale < 1.0 ? cv::INTER_AREA : cv::INTER_CUBIC;
 
-		sprintf(img_label, "Frame #%u", img2_index);
+				cv::resize(img1_overlay, img1_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+				cv::resize(img2_overlay, img2_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
 
-		cv::putText(img2_overlay, img_label, cvPoint(10,40), 
-    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+				cv::resize(img1_warped, img1_warped, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+			}
 
-		cv::putText(img1_warped, "Warped", cvPoint(10,40), 
-    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+			// apply some overlay text to the images
+			char img_label[128];
 
-		// compost overlays into one image
-		cv::Mat img_overlay_composted;
+			sprintf(img_label, "Frame #%u", img1_index);
 
-		cv::hconcat(img1_overlay, img2_overlay, img_overlay_composted);
-		cv::hconcat(img_overlay_composted, img1_warped, img_overlay_composted);
+			cv::putText(img1_overlay, img_label, cvPoint(10,40), 
+	    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+
+			sprintf(img_label, "Frame #%u", img2_index);
+
+			cv::putText(img2_overlay, img_label, cvPoint(10,40), 
+	    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+
+			cv::putText(img1_warped, "Warped", cvPoint(10,40), 
+	    				  cv::FONT_HERSHEY_SIMPLEX, 1.5, cvScalar(0,175,255), 3/*, CV_AA*/);
+
+			// compost overlays into one image
+			cv::Mat img_overlay_composted;
+
+			cv::hconcat(img1_overlay, img2_overlay, img_overlay_composted);
+			cv::hconcat(img_overlay_composted, img1_warped, img_overlay_composted);
 		
-		// display the composted image
-		cv::imshow("Keypoints", img_overlay_composted);
-		cv::waitKey(1);
+			// display the composted image
+			cv::imshow("Keypoints", img_overlay_composted);
+			cv::waitKey(1);
+		}
 
 		// increment total frame count
 		img_count++;
@@ -443,8 +535,8 @@ void process_dir( const std::string& path, const std::vector<std::string>& filte
 	std::sort(files.begin(), files.end());
 
 	// process all files
-	for( uint32_t n=0; n < files.size(); n++ )
-		cout << "   " << files[n] << endl;
+	//for( uint32_t n=0; n < files.size(); n++ )
+	//	cout << "   " << files[n] << endl;
 
 	process_files(files);
 
