@@ -27,12 +27,16 @@ HomographyMethod homography_method = HOMOGRAPHY_PIXEL;
 
 uint32_t dir_count = 0;	// total number of subdirs with files processed
 uint32_t img_count = 0;	// total number of frames been processed
-uint32_t img_ahead = 1;	// number of images ahead to compare against
+
+int img_step_min = 1;    // min frames to look ahead (or behind) when comparing
+int img_step_max = 1;	// max frames to look ahead (or behind) when comparing
 
 std::string   dataset_out_path;	  // path to save the rescaled 8-bit mono images to
 std::ofstream labels_file;		  // path to save the homography displacements to
 
-bool display_visualization = false;  // when true, display a window visualizing the results
+bool   display_visualization = true; // when true, display a window visualizing the results
+int    display_user_timeout  = 1;	  // 1 to render as fast as possible, 0 to wait for key
+double display_scale_factor  = 0.5;  // percentage of the original resolution to display
 
 
 // find homography using feature matching
@@ -235,27 +239,34 @@ bool find_homography_pixel( cv::Mat& img1, cv::Mat& img2, cv::Mat& H )
 
 
 // estimate homographies for the provided image files
-int process_files( const std::vector<std::string>& img_files )
+int process_files( const std::vector<std::string>& img_files, int img_step )
 {
+	/*
+	 * image step should be non-zero (don't compare the same frames)
+	 */
+	if( img_step == 0 )
+		return 0;
+
 	/*
 	 * make sure there are enough files to process
 	 */
-	if( img_files.size() < img_ahead + 1 )
+	if( img_files.size() < std::abs(img_step) + 1 )
 		return 0;
 
-	
 	/*
 	 * generate homography for all images in directory
 	 */
-	const uint32_t num_images = img_files.size();
+	const uint32_t num_images = img_files.size() - (img_step < 0 ? 0 : img_step);
 
-	for( uint32_t img_index=0; img_index < num_images - img_ahead; img_index++ )
+	int img_index = img_step < 0 ? -img_step : 0;	// for negative image step, start enough frames ahead
+
+	for( img_index; img_index < num_images; img_index++ )
 	{
 		/*
 		 * attempt to load this pair of images
 		 */
 		const uint32_t img1_index = img_index;
-		const uint32_t img2_index = img_index + img_ahead;
+		const uint32_t img2_index = img_index + img_step;
 
 		cv::Mat img1_org = cv::imread(img_files[img1_index], cv::IMREAD_GRAYSCALE);
 		cv::Mat img2_org = cv::imread(img_files[img2_index], cv::IMREAD_GRAYSCALE);
@@ -273,7 +284,7 @@ int process_files( const std::vector<std::string>& img_files )
 		}
 
 		cout << "/////////////////////////////////////////////////////" << endl;
-		cout << "// DIR #" << dir_count << ", FRAME #" << img1_index << endl;
+		cout << "// DIR #" << dir_count << ", FRAME #" << img1_index << ", STEP " << img_step << endl;
 		cout << "/////////////////////////////////////////////////////" << endl;
 
 
@@ -306,8 +317,8 @@ int process_files( const std::vector<std::string>& img_files )
 		char img1_file_out[512];
 		char img2_file_out[512];
 
-		sprintf(img1_file_out, "%09u.png", dir_count * 1000000 + img_count);
-		sprintf(img2_file_out, "%09u.png", dir_count * 1000000 + img_count + 1);
+		sprintf(img1_file_out, "%09u.png", dir_count * 1000000 + img1_index);
+		sprintf(img2_file_out, "%09u.png", dir_count * 1000000 + img2_index);
 
 		if( !dataset_out_path.empty() )
 		{
@@ -432,12 +443,17 @@ int process_files( const std::vector<std::string>& img_files )
 			// rescale images to original size
 			if( scale_factor != 1.0 )
 			{
+				// apply a scale factor for visualization
+				const cv::Size img_size_viz(img_size_org.width * display_scale_factor, img_size_org.height * display_scale_factor);
+
+				// determine if we are scaling up or down		
 				const int interpolation_method = inverse_scale < 1.0 ? cv::INTER_AREA : cv::INTER_CUBIC;
 
-				cv::resize(img1_overlay, img1_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
-				cv::resize(img2_overlay, img2_overlay, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+				// rescale inputs and warped image
+				cv::resize(img1_overlay, img1_overlay, img_size_viz/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+				cv::resize(img2_overlay, img2_overlay, img_size_viz/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
 
-				cv::resize(img1_warped, img1_warped, img_size_org/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
+				cv::resize(img1_warped, img1_warped, img_size_viz/*cv::Size()*/, inverse_scale, inverse_scale, interpolation_method);
 			}
 
 			// apply some overlay text to the images
@@ -464,15 +480,32 @@ int process_files( const std::vector<std::string>& img_files )
 		
 			// display the composted image
 			cv::imshow("Keypoints", img_overlay_composted);
-			cv::waitKey(1);
+			cv::waitKey(display_user_timeout);
 		}
 
 		// increment total frame count
 		img_count++;
 	}
 
-	dir_count++;
+	return 1;
 }
+
+
+// estimate homographies for the provided image files
+void process_files( const std::vector<std::string>& img_files )
+{
+	for( int img_step=img_step_min; img_step <= img_step_max; img_step++ )
+	{		
+		if( img_step == 0 )
+			continue;
+
+		const int result = process_files(img_files, img_step);
+
+		if( result > 0 )
+			dir_count++;
+	}
+}
+
 
 // returns true if the directory should be filtered out
 bool filter_dir( const char* name, const std::vector<std::string>& filters )
