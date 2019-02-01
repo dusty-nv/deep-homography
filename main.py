@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from models import Net
+from models import HomographyNet
 from pipeline import HomographyDataset 
 
 
@@ -26,7 +26,7 @@ def main(args):
   dataset_train = HomographyDataset(args.image_path, args.label_path, val_frac=val_frac, mode='train')
   dataset_eval = HomographyDataset(args.image_path, args.label_path, val_frac=val_frac, mode='eval')
 
-  dataloader_train= DataLoader(
+  dataloader_train = DataLoader(
     dataset_train,
     batch_size=batch_size,
     shuffle=True,
@@ -38,8 +38,9 @@ def main(args):
     shuffle=False,
     num_workers=2)
 
-  net = Net()
+  net = HomographyNet(dataset_train.image_width, dataset_train.image_height)
   net.to(device)
+
   criterion = nn.MSELoss()
   optimizer = optim.SGD(net.parameters(), momentum=momentum, lr=lr)
 
@@ -61,7 +62,7 @@ def main(args):
 def train(dataloader_train, device, net, criterion, optimizer, n_it):
   net.train()
   for i, data in enumerate(dataloader_train):
-    if i % 1000 == 0:
+    if i % 100 == 0:
        print('train iter {:d}  {:d} / {:d}'.format(n_it, i, len(dataloader_train)))
 
     optimizer.zero_grad()

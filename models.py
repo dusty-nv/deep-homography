@@ -4,9 +4,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class Net(nn.Module):
-  def __init__(self):
-    super(Net, self).__init__()
+class HomographyNet(nn.Module):
+  def __init__(self, input_width, input_height):
+    super(HomographyNet, self).__init__()
+
+    self.width_factor = int((input_width / 128.0) * 16)
+    self.height_factor = int((input_height / 128.0) * 16) 
+
     #self.sample = nn.AvgPool2d(2)
     self.conv1 = nn.Conv2d(2, 64, 3, padding=1)
     self.bn1 = nn.BatchNorm2d(64)
@@ -27,8 +31,8 @@ class Net(nn.Module):
     self.bn7 = nn.BatchNorm2d(128)
     self.conv8 = nn.Conv2d(128, 128, 3, padding=1)
     self.drop1 = nn.Dropout(p=0.5)
-    self.bn8 = nn.BatchNorm1d(16*16*128)
-    self.fc1 = nn.Linear(16*16*128, 1024)
+    self.bn8 = nn.BatchNorm1d(self.width_factor * self.height_factor * 128)
+    self.fc1 = nn.Linear(self.width_factor * self.height_factor * 128, 1024)
     self.drop2 = nn.Dropout(p=0.5)
     self.bn9 = nn.BatchNorm1d(1024)
     self.fc2 = nn.Linear(1024, 8)
@@ -43,7 +47,7 @@ class Net(nn.Module):
     x = self.bn6(self.pool3(F.relu(self.conv6(x))))
     x = self.bn7(F.relu(self.conv7(x)))
     x = F.relu(self.conv8(x))
-    x = x.view(-1, 16*16*128)
+    x = x.view(-1, self.width_factor * self.height_factor * 128)
     x = self.bn8(self.drop1(x))
     x = F.relu(self.fc1(x))
     x = self.bn9(self.drop2(x))

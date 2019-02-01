@@ -33,9 +33,9 @@ class HomographyDataset(Dataset):
     self.image_path = image_path
     self.label_path = label_path
 
-    print('image mode = ' + mode)
-    print('image path = ' + image_path)
     print('label path = ' + label_path)
+    print('image path = ' + image_path)
+    print('image mode = ' + mode)
 
     assert os.path.isdir(image_path), 'Dataset is missing'
     assert os.path.isfile(label_path), 'Label file is missing'
@@ -50,13 +50,24 @@ class HomographyDataset(Dataset):
     L = len(num_and_label)
     idx = int(val_frac*L)
     
+    # split the dataset for training and validation
     if mode == 'train':
       self.num_and_label = num_and_label[idx:]
     elif mode == 'eval':
       self.num_and_label = num_and_label[:idx]
     else:
       raise ValueError('no such mode')
-      
+
+    # determine the input resolution
+    test_filename = '{:s}/{:s}'.format(self.image_path, self.num_and_label[0][0])
+    test_image = jpg_reader(test_filename)
+
+    self.image_dims   = test_image.shape
+    self.image_width  = self.image_dims[1]
+    self.image_height = self.image_dims[0]
+
+    print('image size = ' + '{:d}x{:d}'.format(self.image_width, self.image_height))      
+
   def __len__(self):
     return len(self.num_and_label)
 

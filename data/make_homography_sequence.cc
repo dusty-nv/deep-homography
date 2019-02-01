@@ -31,12 +31,12 @@ uint32_t img_count = 0;	// total number of frames been processed
 int img_step_min = 1;    // min frames to look ahead (or behind) when comparing
 int img_step_max = 1;	// max frames to look ahead (or behind) when comparing
 
-std::string   dataset_out_path;	  // path to save the rescaled 8-bit mono images to
-std::ofstream labels_file;		  // path to save the homography displacements to
+std::string   dataset_out_path;	   // path to save the rescaled 8-bit mono images to
+std::ofstream labels_file;		   // path to save the homography displacements to
 
 bool   display_visualization = true; // when true, display a window visualizing the results
-int    display_user_timeout  = 1;	  // 1 to render as fast as possible, 0 to wait for key
-double display_scale_factor  = 0.5;  // percentage of the original resolution to display
+int    display_user_timeout  = 1;	   // 1 to render as fast as possible, 0 to wait for key
+double display_scale_factor  = 1.0;   // percentage of the original resolution to display
 
 
 // find homography using feature matching
@@ -295,7 +295,7 @@ int process_files( const std::vector<std::string>& img_files, int img_step )
 		const double inverse_scale = 1.0 / scale_factor;
 
 		const cv::Size img_size_org(img1_org.cols, img1_org.rows);
-		const cv::Size img_size_scaled(128, 128);
+		const cv::Size img_size_scaled(320, 240);
 
 		cv::Mat img1;
 		cv::Mat img2;
