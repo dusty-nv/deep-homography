@@ -1,7 +1,13 @@
 import onnx
+import argparse
+import sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--model', type=str, default='deep_homography.onnx')
+args = parser.parse_args(sys.argv[1:])
 
 # Load the ONNX model
-model = onnx.load("deep_homography.onnx")
+model = onnx.load(args.model)
 
 # Print a human readable representation of the graph
 print('Network Graph:')
