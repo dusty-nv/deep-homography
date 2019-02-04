@@ -38,7 +38,7 @@ def prep_batch(f1, f2, img_width, img_height):
 
 def export_onnx(batch, model_in, model_out, img_width, img_height, scale=32):
   device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-  print(device)
+  print('running on device ' + str(device))
 
   batch = normalize_batch(batch).to(device)
 
